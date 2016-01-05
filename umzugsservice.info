@@ -1,0 +1,5 @@
+core = "7.x"
+description = "Module for managing a relocation-logistic business."
+name = "Umzugsservice"
+version = 1.0
+scripts[] = /js/umz_termine.js

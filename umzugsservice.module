@@ -1,0 +1,856 @@
+<?php
+
+// vim: set filetype=php expandtab tabstop=2 shiftwidth=2 autoindent smartindent:
+
+/**
+ * Implements hook_menu().
+ */
+function umzugsservice_menu() {
+    $items = array();
+
+    $items['phonebook'] = array(
+        'page callback' => 'drupal_get_form',
+        'page arguments' => array('phonebook_form'),
+        'access callback' => TRUE,
+    );
+    
+    $items['phonebook/phones'] = array(
+        'title' => 'Phones',
+        'type' => MENU_DEFAULT_LOCAL_TASK,
+    );
+    
+    $items['phonebook/add_phone'] = array(
+        'title' => 'Add phone',
+        'page callback' => 'drupal_get_form',
+        'page arguments' => array('add_phone_form'),
+        'access callback' => TRUE,
+        'type' => MENU_LOCAL_TASK,
+        'weight' => 1,
+    );
+
+    $items['phonebook/del_phone'] = array(
+        'title' => 'Delete phones',
+        'page callback' => 'drupal_get_form',
+        'page arguments' => array('del_phone_form'),
+        'access callback' => TRUE,
+        'type' => MENU_LOCAL_TASK,
+        'weight' => 2,
+    );
+
+    $items['statistics'] = array(
+        'title' => t('Statistics'),
+        'description' => 'Statistics.',
+        'page callback' => 'cb_statistics_page',
+        'page arguments' => array(),
+        'access callback' => TRUE
+    );
+
+    $items['statistics2'] = array(
+        'title' => t('Statistics2'),
+        'description' => 'Statistics2',
+        'page callback' => 'cb_statistics2_page',
+        'page arguments' => array(),
+        'access callback' => TRUE
+    );
+
+    return $items;
+}
+
+/**
+ * Implements hook_theme().
+ * Tutorial: http://www.jaypan.com/tutorial/themeing-drupal-7-forms-including-css-and-js
+ */
+function umzugsservice_theme() {
+    return array(
+        'phonebook_form' => array(
+            'render element' => 'form'
+        ),
+        'del_phone_form' => array(
+            'render element' => 'form'
+        ),
+        'statistics_form' => array(
+            'render element' => 'form'
+        ),
+    );
+}
+
+/**
+ * Implements hook_block_info().
+ */
+function umzugsservice_block_info() {
+    $blocks = array();
+    $blocks['stat_bl'] = array(
+        'info' => t('Stat block'),
+    );
+    $blocks['whatsapp_bl'] = array(
+        'info' => t('WhatsApp link'),
+    );
+    return $blocks;
+}
+
+/**
+ * Implements hook_block_view().
+ */
+function umzugsservice_block_view($delta = '') {
+    $block = array();
+    switch ($delta) {
+        case 'stat_bl':
+            $block['subject'] = '';
+            $block['content'] = _umzugsservice_stat_bl_content();
+            break;
+        case 'whatsapp_bl':
+            $block['subject'] = '';
+            $block['content'] = _umzugsservice_whatsapp_bl_content();
+            break;
+    }
+    return $block;
+}
+
+/**
+ * Returns content of block for 'statistics block'
+ */
+function _umzugsservice_stat_bl_content() {
+    $today_ts = time();
+    $today = date("d.m.Y", ($today_ts));
+    $tomorrow = date("d.m.Y", ($today_ts + (1 * 24 * 60 * 60)));
+    $after_tomorrow = date("d.m.Y", ($today_ts + (2 * 24 * 60 * 60)));
+
+    $output = '<table id="stat_table">
+    <tr>
+    <th id="umz" rowspan="3">';
+    $form = drupal_get_form('neue_umzug_button_form');
+    $output .= drupal_render($form);
+    $output .= '</th>
+    <th id="umz_count" colspan="3">'
+            . t('Count relocations for nearest dates') . '</th>'
+            . '<th></th>
+    </tr>
+    <tr>
+    <td>' . $today . '</td>
+    <td>' . $tomorrow . '</td>
+    <td>' . $after_tomorrow . '</td>'
+            . '<td class="umz_buttons">';
+    //$form = drupal_get_form('inc_statistic_button_form');
+    $form = drupal_get_form('inc_termine_button_form');
+    $output .= drupal_render($form);
+    $output .= '</td>
+  </tr>
+  <tr>
+    <td class="umz_stat">' . _get_count_umzugs_in_day($today) . '</td>
+    <td class="umz_stat">' . _get_count_umzugs_in_day($tomorrow) . '</td>
+    <td class="umz_stat">' . _get_count_umzugs_in_day($after_tomorrow) . '</td>
+    <td class="umz_buttons">';
+    $form = drupal_get_form('phonebook_button_form');
+    $output .= drupal_render($form);
+    $output .= '</td>
+    </tr>
+    </table>';
+    return $output;
+}
+
+/**
+ * Returns content of block for 'whatsap block'
+ * Whatsapp block provides a link for comfortable sending content of event.
+ */
+function _umzugsservice_whatsapp_bl_content() {
+    //$user_agent = filter_input(INPUT_SERVER, "HTTP_USER_AGENT");
+
+    $iPod = stripos($_SERVER['HTTP_USER_AGENT'], "iPod");
+    $iPhone = stripos($_SERVER['HTTP_USER_AGENT'], "iPhone");
+    $iPad = stripos($_SERVER['HTTP_USER_AGENT'], "iPad");
+    $Android = stripos($_SERVER['HTTP_USER_AGENT'], "Android");
+    $webOS = stripos($_SERVER['HTTP_USER_AGENT'], "webOS");
+
+    if (!$iPod && !$iPhone && !$iPad && !$Android && !$webOS) {
+        return '';
+    }
+
+    $path_arr = drupal_parse_url(current_path());
+    $matches = array();
+    $path = $path_arr['path'];
+    preg_match('/node\/(?<id>\d+)/', $path, $matches);
+
+    if (empty($matches) && empty($matches['id'])) {
+        return '';
+    }
+
+
+    $node = node_load($matches['id']);
+
+    $output = t(' Termin info.') . urlencode("\r\n");
+    $output .= t(' Name: ') . $node->title . '; ' . urlencode("\r\n");
+    if (!empty($node->field_datum['und'][0]['value'])) {
+        $output .= t(' Datum: ')
+                . $node->field_datum['und'][0]['value'] . '; '
+                . urlencode("\r\n");
+    }
+    if (!empty($node->field_strasse['und'][0]['value'])) {
+        $output .= t(' Adresse: ') . $node->field_strasse['und'][0]['value']
+                . ', '
+                . (!empty($node->field_plz['und'][0]['value']) ?
+                        $node->field_plz['und'][0]['value'] . ' ' : ' ')
+                . (!empty($node->field_stadt['und'][0]['value']) ? $node->field_stadt['und'][0]['value'] . ' ' : ' ')
+                . ';'
+                . urlencode("\r\n");
+    }
+    if (!empty($node->field_telefon['und'][0]['value'])) {
+        $output .= t(' Telefon: ')
+                . $node->field_telefon['und'][0]['value'] . '; '
+                . urlencode("\r\n");
+    }
+    if (!empty($node->field_etage['und'][0]['value'])) {
+        $output .= t(' Etage: ')
+                . $node->field_etage['und'][0]['value'] . '; '
+                . urlencode("\r\n");
+    }
+    if (!empty($node->field_wohnfl_che['und'][0]['value'])) {
+        $output .= t(' Wohnfläche: ') 
+                . $node->field_wohnfl_che['und'][0]['value'] . '; ' 
+                . urlencode("\r\n");
+    }
+    if (!empty($node->field_umzugshelfer['und'][0]['value'])) {
+        $output .= t(' Umzugshelfer Zählung: ') 
+                . $node->field_umzugshelfer['und'][0]['value'] . '; '
+                . urlencode("\r\n");
+    }
+    if (!empty($node->field_sonstige['und'][0]['value'])) {
+        $output .= t(' Sonstige: ') 
+                . $node->field_sonstige['und'][0]['value'] . '; '
+                . urlencode("\r\n");
+    }
+
+    return '<a href="whatsapp://send?abid=Mein&text=' . $output . '">' 
+            . t('Teilen Sie auf ') 
+            . 'WhatsApp</a>';
+}
+
+/**
+ * Sends whatsapp message on a needed phone number using whatsapp API.
+ */
+function send_whatsapp_message($target, $message) {
+    require_once 'sites/all/libraries/Chat-API-master/src/whatsprot.class.php';
+    module_load_include('inc', 'umzugsservice', 'whatsapp');
+    
+    $username = WHATSAPP_LOGIN; // Phone number with country code, ie: 34123456789
+    $password = WHATSAPP_PASS;
+    $nickname = "Leotransporte"; // Your nickname, it will appear in push notifications
+    $debug = false;  // Shows debug log, this is set to false if not specified
+
+    $w = new WhatsProt($username, $nickname, $debug);
+    $w->connect(); // Connect to WhatsApp network
+    $w->loginWithPassword($password); // logging in with the password we got!
+
+    $w->sendMessage($target, $message);
+    return true;
+}
+
+/**
+ * Callback for returning statistics page.
+ * (Temporary page for testing).
+ */
+function cb_statistics_page() {
+    global $user;
+    $output = '';
+    if (!user_access('administer')
+            && !(is_array($user->roles)
+            && in_array('privileged user', $user->roles))) {
+        return 'Acces denided';
+    }
+    $query = db_select('node', 'n');
+    $query->join('field_data_field_datum', 'd', 'd.entity_id = n.nid');
+    $query->join('field_data_field_preis', 'p', 'p.entity_id = n.nid');
+
+    $query->addExpression('YEAR(field_datum_value)', 'Year');
+    $query->addExpression('MONTH(field_datum_value)', 'Month');
+    $query->addExpression('SUM(p.field_preis_value)', 'Preis');
+
+    $query->groupBy('Month');
+    $query->groupBy('Year');
+
+    $result = $query->execute();
+    while ($record = $result->fetchAssoc()) {
+        $row[0] = $record['Year'];
+        $row[1] = $record['Month'];
+        $row[2] = $record['Preis'];
+        $rows[] = $row;
+    }
+    if (!empty($rows)) {
+        $variables = array(
+            'header' => array(t('Year'), t('Month'), t('Income')),
+            'rows' => $rows
+        );
+        $output = theme('table', $variables);
+    }
+    return $output;
+}
+
+/**
+ * Callback for returning statistics page.
+ * (Temporary page for testing).
+ */
+function cb_statistics2_page() {
+    //file_put_contents('D:\www\log.log', var_export($_SESSION, TRUE));
+    $output = '<div class="stat-form">';
+    $form = drupal_get_form('statistics2_form');
+    $output .= drupal_render($form);
+    $output .= '</div> <!-- /stat-form -->';
+
+    global $user;
+    if (!user_access('administer') && !(is_array($user->roles) && in_array('privileged user', $user->roles))) {
+        return 'Acces denided';
+    }
+    if (!empty($_SESSION['year']) && !empty($_SESSION['month'])) {
+
+        $query = db_select('node', 'n');
+        $query->join('field_data_field_datum', 'd', 'd.entity_id = n.nid');
+        $query->join('field_data_field_preis', 'p', 'p.entity_id = n.nid');
+
+        $query->addExpression('YEAR(field_datum_value)', 'Year');
+        $query->addExpression('MONTH(field_datum_value)', 'Month');
+        $query->addExpression('DAY(field_datum_value)', 'Day');
+        $query->addExpression('SUM(p.field_preis_value)', 'Preis');
+        $query->where('YEAR(field_datum_value) =' . $_SESSION['year']);
+        $query->where('MONTH(field_datum_value) =' . $_SESSION['month']);
+
+        $query->groupBy('Day');
+        $query->groupBy('Month');
+        $query->groupBy('Year');
+
+        $result = $query->execute();
+        while ($record = $result->fetchAssoc()) {
+            $row[0] = $record['Year'];
+            $row[1] = $record['Month'];
+            $row[2] = $record['Day'];
+            $row[3] = $record['Preis'];
+            $rows[] = $row;
+        }
+
+        if (!empty($rows)) {
+            $variables = array('header' => array(t('Year'), t('Month'), t('Day'),  t('Income')), 'rows' => $rows);
+            $output .= theme('table', $variables);
+        }
+    }
+    return $output;
+}
+
+/**
+ * Dynamic form for collecting statistics per years and months
+ */
+function statistics2_form($form, &$form_state) {
+    //file_put_contents ('D:\www\log.log', var_export($form_state, TRUE));
+    $years = _get_years();
+    $selected = isset($form_state['values']['years']) ? $form_state['values']['years'] : reset($years);
+
+    $form = array('#attributes' => array('enctype' => 'multipart/form-data'));
+    $form['years'] = array(
+        '#type' => 'select',
+        '#title' => t('year'),
+        '#options' => $years,
+        '#default_value' => $selected,
+        '#ajax' => array(
+            'callback' => 'ajax_years_dropdown_callback',
+            'wrapper' => 'months-list',
+            'method' => 'replace',
+            'event' => 'change',
+        ),
+    );
+
+    $form['months'] = array(
+        '#type' => 'select',
+        '#options' => _get_monthes_by_year($selected),
+        '#prefix' => '<div id="months-list">',
+        '#suffix' => '</div>',
+    );
+    
+    $form['submit_button'] = array(
+        '#type' => 'submit',
+        '#value' => t('Submit!'),
+    );
+
+    return $form;
+}
+
+/**
+ * Callback for statistics2_form.
+ *
+ * @return array
+ *   Renderable array (the textfield element)
+ */
+function ajax_years_dropdown_callback($form, $form_state) {
+  return $form['months'];
+}
+
+/**
+ * Submit for statistics2_form.
+ */
+function statistics2_form_submit($form, &$form_state) {
+    //file_put_contents ('D:\www\log.log', var_export($form_state, TRUE));
+    $_SESSION['year'] = $form_state['values']['years'];
+    $_SESSION['month'] = $form_state['values']['months'];
+
+    $form_state['redirect'] = 'statistics2';
+}
+
+/**
+ * Returns count relocations in a day.
+ */
+function _get_count_umzugs_in_day($date) {
+    $result = db_query("
+        SELECT COUNT(n.nid) AS termines_count
+        FROM
+            node n
+        LEFT JOIN field_data_field_datum df ON n.nid = df.entity_id 
+            AND (df.entity_type = 'node' 
+            AND df.deleted = '0')
+        WHERE (( (n.type = 'der_umzug') 
+            AND (DATE_FORMAT(ADDTIME(df.field_datum_value, SEC_TO_TIME(3600)), '%d.%m.%Y') = :date) ))
+        LIMIT 1", array(':date' => $date));
+    $count_arr = $result->fetchAssoc();
+    
+    return $count_arr['termines_count'];
+}
+
+/**
+ * Returns all years with the active statistics.
+ */
+function _get_years() {
+    //SELECT DISTINCT YEAR(field_datum_value) AS Year 
+    //FROM node n 
+    //INNER JOIN field_data_field_datum d ON d.entity_id = n.nid
+    $query = db_select('node', 'n');
+    $query->join('field_data_field_datum', 'd', 'd.entity_id = n.nid');
+    $query->addExpression('DISTINCT YEAR(field_datum_value)', 'Year');
+    $result = $query->execute();
+
+    while ($record = $result->fetchAssoc()) {
+        $years[$record['Year']] = $record['Year'];
+    }
+    
+    return $years;
+}
+
+/**
+ * Returns all maonth in the year with the active statistics.
+ */
+function _get_monthes_by_year($year) {
+    // SELECT DISTINCT MONTH(field_datum_value) AS Year
+    // FROM node n 
+    // INNER JOIN field_data_field_datum d ON d.entity_id = n.nid 
+    // WHERE YEAR(field_datum_value) = 2016
+    $query = db_select('node', 'n');
+    $query->join('field_data_field_datum', 'd', 'd.entity_id = n.nid');
+    $query->addExpression('DISTINCT MONTH(field_datum_value)', 'Month');
+    $query->where('YEAR(field_datum_value) =' . $year);
+    $result = $query->execute();
+
+    while ($record = $result->fetchAssoc()) {
+        $months[$record['Month']] = $record['Month'];
+    }
+    
+    return $months;
+}
+
+/**
+ * Returns list of busses from taxomomy.
+ */
+function _get_buss_list() {
+    //SELECT tid, name 
+    //FROM taxonomy_term_data
+    //WHERE vid=3;
+    $query = db_select('taxonomy_term_data', 't');
+    $query->addExpression('tid', 'tid');
+    $query->addExpression('name', 'name');
+    $query->where('vid = 3');
+
+    $result = $query->execute();
+    $busses = array();
+    while ($record = $result->fetchAssoc()) {
+        $busses[$record['tid']] = $record['name'];
+    }
+    
+    return $busses;
+}
+
+/**
+ * Returns active (busses for which allowed receive messages) busses.
+ */
+function _get_umz_active_buss_list_by_tid($tid, $is_active = TRUE) {
+  $result = db_select('umz_busses', 'u')
+                ->fields('u')
+                ->condition('tid', $tid, '=')
+                ->condition('active', $is_active, '=')
+                ->execute();
+  
+    $umz_busses = array();
+    while ($record = $result->fetchAssoc()) {
+        $umz_busses[] = $record['tel'];
+    }
+    
+    return $umz_busses;
+}
+
+/**
+ * Returns list of phones.
+ */
+function _get_phone_list() {
+    $bus_names_vid = 3;
+    $query = db_select('taxonomy_term_data', 't');
+    $query->leftjoin('umz_busses', 'ub', 'ub.tid = t.tid');
+    $query->fields('t', array('tid', 'name'));
+    $query->fields('ub', array('id', 'owner', 'tel', 'active'));
+    $query->condition('t.vid', $bus_names_vid, '=');
+    $query->orderBy('ub.tid', 'ASC');
+    $result = $query->execute();
+    $phones = array();
+    while ($record = $result->fetchAssoc()) {
+        $phones[$record['id']] = array (
+        'tid' => $record['tid'],
+        'name' => $record['name'],
+        'owner' => $record['owner'],
+        'tel' => $record['tel'],
+        'active' => $record['active'],
+        );
+    }
+    return $phones;
+}
+
+/**
+ * Form for providing 'New relocation' button.
+ */
+function neue_umzug_button_form($form, &$form_state) {
+    $form['submit_button'] = array(
+        '#type' => 'submit',
+        '#value' => t('New relocation'),
+    );
+    $form['#action'] = url('node/add/der-umzug');
+    return $form;
+}
+
+/**
+ * Form for providing 'Statistics' button.
+ */
+function inc_statistic_button_form($form, &$form_state) {
+    $form['submit_button'] = array(
+        '#type' => 'submit',
+        '#value' => t('Statistics'),
+    );
+    $form['#action'] = url('statistics');
+
+    return $form;
+}
+
+/**
+ * Form for providing 'Appointments' button.
+ */
+function inc_termine_button_form($form, &$form_state) {
+    $form['termine_button'] = array(
+        '#type' => 'submit',
+        '#value' => t('Appointments'),
+    );
+    $form['#action'] = url('calendar-node-field-datum');
+
+    return $form;
+}
+
+/**
+ * Form for providing 'Phone book' button.
+ */
+function phonebook_button_form($form, &$form_state) {
+    $form['submit_button'] = array(
+        '#type' => 'submit',
+        '#value' => t('Phone book'),
+    );
+    $form['#action'] = url('phonebook');
+
+    return $form;
+}
+
+/**
+ * Form for editing Phone book.
+ */
+function phonebook_form($form, &$form_state) {
+    $phones = _get_phone_list();
+
+    $form = array('#attributes' => array('enctype' => 'multipart/form-data'));
+    $form['busses'] = array(
+        '#tree' => TRUE,
+    );
+
+    foreach ($phones as $key => $record) {
+        $form['busses'][$key]['tid'] = array(
+            '#type' => 'hidden',
+            '#value' => $record['tid'],
+        );
+
+        $form['busses'][$key]['bus'] = array(
+            '#type' => 'item',
+            '#markup' => $record['name'],
+        );
+
+        $form['busses'][$key]['owner'] = array(
+            '#type' => 'textfield',
+            '#size' => 45,
+            '#maxlength' => 45,
+            '#default_value' => $record['owner'],
+        );
+
+        $form['busses'][$key]['tel'] = array(
+            '#type' => 'textfield',
+            '#size' => 45,
+            '#maxlength' => 45,
+            '#default_value' => $record['tel'],
+        );
+
+        $form['busses'][$key]['active'] = array(
+            '#type' => 'checkbox',
+            '#default_value' => !empty($record['active']),
+        );
+    }
+    $form['submit_button'] = array(
+        '#type' => 'submit',
+        '#value' => t('Submit!'),
+    );
+
+    return $form;
+}
+
+/**
+ * Submit for phonebook_form.
+ */
+function phonebook_form_submit($form, &$form_state) {
+    //file_put_contents ('D:\www\log.log', var_export($form_state, TRUE));
+    foreach ($form_state['values']['busses'] as $key => $val) {
+        $owner = $val['owner'];
+        $tel = $val['tel'];
+        $active = $val['active'];
+        $umz_updated = db_update('umz_busses')
+                ->fields(array(
+                    'owner' => $owner,
+                    'tel' => $tel,
+                    'active' => $active,
+                ))
+                ->condition('id', $key, '=')
+                ->execute();
+    }
+    drupal_set_message(t('Event was saved.'));
+}
+
+/**
+ * Theming of phonebook_form.
+ */
+function theme_phonebook_form($variables) {
+    //file_put_contents ('D:\www\log.log', var_export($variables, TRUE));
+    global $user;
+    if (!user_access('administer')
+            && !(is_array($user->roles)
+            && in_array('privileged user', $user->roles))) {
+        return 'Acces denided';
+    }
+    $form = $variables['form'];
+    $rows = array();
+    $row = array();
+    foreach (element_children($form['busses']) as $key) {
+        $row[0] = drupal_render($form['busses'][$key]['bus']);
+        $row[1] = drupal_render($form['busses'][$key]['owner']);
+        $row[2] = drupal_render($form['busses'][$key]['tel']);
+        $row[3] = drupal_render($form['busses'][$key]['active']);
+        $rows[] = $row;
+    }
+    $variables = array(
+        'header' => array(t('Bus'), t('Responsible'), t('Tel'), t('Is active')),
+        'rows' => $rows,
+    );
+    $html = theme('table', $variables);
+    return $html . drupal_render_children($form);
+}
+
+/**
+ * Form for adding new phone number.
+ */
+function add_phone_form() {
+    $busses = _get_buss_list();
+    $form = array('#attributes' => array('enctype' => 'multipart/form-data'));
+
+    $form['buss'] = array(
+        '#title' => t('Buss'),
+        '#type' => 'select',
+        '#options' => $busses,
+    );
+
+    $form['owner'] = array(
+        '#title' => t('Responsible'),
+        '#type' => 'textfield',
+        '#size' => 45,
+        '#maxlength' => 45,
+    );
+
+    $form['tel'] = array(
+        '#title' => t('Tel'),
+        '#type' => 'textfield',
+        '#size' => 45,
+        '#maxlength' => 45,
+    );
+
+    $form['active'] = array(
+        '#title' => t('Is active'),
+        '#type' => 'checkbox',
+    );
+    
+    $form['submit_button'] = array(
+        '#type' => 'submit',
+        '#value' => t('Add!'),
+    );
+    
+    return $form;
+}
+
+/**
+ * Submit for add_phone_form.
+ */
+function add_phone_form_submit($form, &$form_state) {
+    //file_put_contents('D:\www\log.log', var_export($form_state['values'], TRUE));
+
+    $nid = db_insert('umz_busses')
+            ->fields(array(
+                'tid' => $form_state['values']['buss'],
+                'owner' => $form_state['values']['owner'],
+                'active' => $form_state['values']['active'],
+                'tel' => $form_state['values']['tel'],
+            ))
+            ->execute();
+
+    if (!empty($nid)) {
+        drupal_set_message(t('New phone was added.'));
+    }
+}
+
+/**
+ * Form for deleting phone numbers.
+ */
+function del_phone_form($form, &$form_state) {
+    $phones = _get_phone_list();
+
+    $form = array('#attributes' => array('enctype' => 'multipart/form-data'));
+    $form['busses'] = array(
+        '#tree' => TRUE,
+    );
+
+    foreach ($phones as $key => $record) {
+        $form['busses'][$key]['bus'] = array(
+            '#type' => 'item',
+            '#markup' => $record['name'],
+        );
+
+        $form['busses'][$key]['owner'] = array(
+            '#type' => 'item',
+            '#markup' => $record['owner'],
+        );
+
+        $form['busses'][$key]['tel'] = array(
+            '#type' => 'item',
+            '#markup' => $record['tel'],
+        );
+
+        $form['busses'][$key]['del'] = array(
+            '#type' => 'checkbox',
+        );
+    }
+    $form['submit_button'] = array(
+        '#type' => 'submit',
+        '#value' => t('Delete!'),
+    );
+
+    return $form;
+}
+
+/**
+ * Submit for del_phone_form.
+ */
+function del_phone_form_submit($form, &$form_state) {
+    //file_put_contents('D:\www\log.log', var_export($form_state['values'], TRUE));
+    $count = 0;
+    foreach ($form_state['values']['busses'] as $id => $buss) {
+        if (!empty($buss['del'])) {
+            $umz_deleted = db_delete('umz_busses')
+                    ->condition('id', $id)
+                    ->execute();
+            $count++;
+        }
+    }
+
+    if (!empty($count)) {
+        drupal_set_message($count . t(' records were deleted.'));
+    }
+}
+
+/**
+ * Theming of del_phone_form.
+ */
+function theme_del_phone_form($variables) {
+    //file_put_contents ('D:\www\log.log', var_export($variables, TRUE));
+    global $user;
+    if (!user_access('administer') && !(is_array($user->roles) && in_array('privileged user', $user->roles))) {
+        return 'Acces denided';
+    }
+    $form = $variables['form'];
+    $rows = array();
+    $row = array();
+    foreach (element_children($form['busses']) as $key) {
+        $row[0] = drupal_render($form['busses'][$key]['bus']);
+        $row[1] = drupal_render($form['busses'][$key]['owner']);
+        $row[2] = drupal_render($form['busses'][$key]['tel']);
+        $row[3] = drupal_render($form['busses'][$key]['del']);
+        $rows[] = $row;
+    }
+    $variables = array(
+        'header' => array(t('Bus'), t('Responsible'), t('Tel'), t('Delete')),
+        'rows' => $rows,
+    );
+    $html = theme('table', $variables);
+    return $html . drupal_render_children($form);
+}
+
+/**
+ * Submit for der_umzug_node_form.
+ */
+function der_umzug_node_form_submit($form, &$form_state) {
+    //file_put_contents ('D:\www\log.log', var_export($form_state['values'], TRUE));
+    global $base_url;
+    $indexes = array('6' => 'b1', '7' => 'b2', '8' => 'b3', '9' => 'b4',
+        '10' => 'b5', '11' => 'b6', '12' => 'b7', '14' => 'b8', '15' => 'b9', '16' => 'b10');
+    
+    if (!empty($form_state['values']['field_transporter']['und'][0]['tid'])) {
+        $tid = $form_state['values']['field_transporter']['und'][0]['tid'];
+        $umz_busses = _get_umz_active_buss_list_by_tid($tid);
+        
+        foreach ($umz_busses as $tel) {
+            if (!empty($tel)) {
+                $date = $form_state['values']['field_datum']['und'][0]['value'];
+                $d = strtotime($date) + $form_state['values']['field_datum']['und'][0]['offset'];
+                $current_path = current_path();
+                if (strpos($current_path, '/edit')) { // event was edited
+                    $date = date("d-m-Y H:i", $d);
+                    $url = $base_url . '/?q=' . str_replace('/edit', '', $current_path);
+                    $txt = t('Termin für den Datum ')
+                            . $date
+                            . t(' bearbeitet wurde')
+                            . ' ( ' . $url . ' ) ';
+                } else { // new event
+                    $date = date("Y-m-d", $d);
+                    $url = $base_url . '/?q=calendar-node-field-datum-'
+                            . $indexes[$tid]
+                            . '/day/'
+                            . $date;
+                    $txt = t('Du hast neue Termin am ')
+                            . $date
+                            . ' ( ' . $url . ' ) ';
+                }
+
+                $res = send_whatsapp_message($tel, $txt);
+                if ($res) {
+                    drupal_set_message(t('Message was sent.'));
+                }
+            }
+        }
+    }
+}
